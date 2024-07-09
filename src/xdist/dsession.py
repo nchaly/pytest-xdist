@@ -21,6 +21,7 @@ from xdist.scheduler import LoadScheduling
 from xdist.scheduler import LoadScopeScheduling
 from xdist.scheduler import Scheduling
 from xdist.scheduler import WorkStealingScheduling
+from xdist.scheduler.loadscope import get_respawn_workers_param
 from xdist.workermanage import NodeManager
 from xdist.workermanage import WorkerController
 
@@ -65,6 +66,7 @@ class DSession:
         if self.terminal:
             self.trdist = TerminalDistReporter(config)
             config.pluginmanager.register(self.trdist, "terminaldistreporter")
+        self._respawn_workers = get_respawn_workers_param(self.config)
 
     @property
     def session_finished(self) -> bool:
@@ -131,6 +133,9 @@ class DSession:
             config=self.config, log=self.log
         )
         assert self.sched is not None
+        if not isinstance(self.sched, LoadScopeScheduling) and self._respawn_workers:
+            # Reset `respawn_workers` for not supported scheduling.
+            self._respawn_workers = False
 
         self.shouldstop = False
         pending_exception = None
@@ -197,6 +202,10 @@ class DSession:
 
         The node might not be in the scheduler if it had not emitted
         workerready before shutdown was triggered.
+
+        When respawning workers, this method may be invoked earlier,
+        when scheduler asks a worker to shut down after processing
+        a part of work (scope).
         """
         self.config.hook.pytest_testnodedown(node=node, error=None)
         if node.workeroutput["exitstatus"] == 2:  # keyboard-interrupt
@@ -216,6 +225,15 @@ class DSession:
                 crashitem = self.sched.remove_node(node)
                 assert not crashitem, (crashitem, node)
         self._active_nodes.remove(node)
+
+        if (
+                self._respawn_workers
+                and not self.shuttingdown
+                and len(self._active_nodes) < len(self.nodemanager.specs)
+        ):
+            # If session is still running and there is a room, spawn new worker.
+            self._clone_node(node)
+            node.ensure_teardown()
 
     def worker_internal_error(
         self, node: WorkerController, formatted_error: str
@@ -303,6 +321,11 @@ class DSession:
                     self.terminal.write_line(
                         f"scheduling tests via {self.sched.__class__.__name__}"
                     )
+                if self._respawn_workers:
+                    self.report_line(
+                        "xdist: Workers will be respawned after scope completion."
+                    )
+
             self.sched.schedule()
 
     def worker_logstart(

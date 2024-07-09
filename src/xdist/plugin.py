@@ -185,6 +185,16 @@ def pytest_addoption(parser: pytest.Parser) -> None:
             "Unlimited if not set."
         ),
     )
+    group.addoption(
+        "--respawn-workers",
+        action="store_true",
+        default=False,
+        dest="respawnworkers",
+        help="When set, workers will be restarted after scheduled scope execution\n"
+             "is complete. Applicable only when --dist is 'loadscope', 'loadfile' or\n"
+             "'loadgroup'. When fixtures are heavy, make sure to choose adequate\n"
+             "scope size.",
+    )
 
     parser.addini(
         "rsyncdirs",

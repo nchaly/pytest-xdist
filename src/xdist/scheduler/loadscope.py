@@ -104,6 +104,7 @@ class LoadScopeScheduling:
             self.log = log.loadscopesched
 
         self.config = config
+        self._respawn_workers = get_respawn_workers_param(config)
 
     @property
     def nodes(self) -> list[WorkerController]:
@@ -280,6 +281,10 @@ class LoadScopeScheduling:
         ]
 
         node.send_runtest_some(nodeids_indexes)
+        if self._respawn_workers and nodeids_indexes:
+            # Automatically push "shutdown" message which
+            # triggers worker completion after scope is done.
+            node.shutdown()
 
     def _split_scope(self, nodeid: str) -> str:
         """Determine the scope (grouping) of a nodeid.
@@ -351,6 +356,12 @@ class LoadScopeScheduling:
         # Initial distribution already happened, reschedule on all nodes
         if self.collection is not None:
             for node in self.nodes:
+                if node not in self.registered_collections:
+                    # Skip nodes which are not finished collection.
+                    # This may happen when nodes are respawned and are
+                    # still in progress of tests collection.
+                    # When they are ready, this method will be invoked again.
+                    continue
                 self._reschedule(node)
             return
 
@@ -432,3 +443,12 @@ class LoadScopeScheduling:
             self.config.hook.pytest_collectreport(report=rep)
 
         return same_collection
+
+
+def get_respawn_workers_param(config: pytest.Config) -> bool:
+    """Gets `_respawn_workers` parameter value."""
+    result = False
+    result_str: str | None = config.option.respawnworkers
+    if result_str is not None:
+        result = bool(result_str)
+    return result
